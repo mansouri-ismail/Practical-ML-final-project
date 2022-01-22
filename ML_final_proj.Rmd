@@ -1,0 +1,182 @@
+---
+title: 'Practical machine learning course project'
+author: "ismail"
+date: "12/31/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+
+## Abstract
+In this report of the Practical machine learning course project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. This is represented by “classe” variable in the training data set. 
+Since the outcome of the prediction is multiple classes I used 4 classification prediction models: 
+**Decision Tree**, **Random Forest**, **Gradient Boosted Trees**, **Linear Discriminant Analysis**
+I split the training dataset into 2 parts: 75% to train the models and 25% for testing/validation to evaluate the accuracy of each algorithm then I used 3-folds cross-validation on the training set and choose the more accurate model to predict 20 samples.
+Random forest prediction model is the most accurate with an accuracy of 99.1% and an Out-of-sample error:0.8%.
+
+## Getting and cleaning data :
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r ,message=FALSE}
+if(!require(ggcorrplot)) install.packages("ggcorrplot")
+library(rattle)
+library(ggcorrplot)
+library(dplyr)
+library(caret)
+library(ggplot2)
+
+download.file(url ="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",destfile = "sport_training.csv")
+
+download.file(url ="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",destfile = "sport_testing.csv")
+
+Rawdf_training<-read.csv("sport_training.csv")
+Rawdf_testing<-read.csv("sport_testing.csv")
+
+```
+
+### Checking for missing data
+* 67 variables have more than 97% missing data ,i choose to remove them.
+
+```{r }
+sort(sapply(Rawdf_training, function(x){sum(is.na(x)*1)/length(x)}),decreasing = TRUE)[1:70]
+```
+### Picking the right features :
+
+* The variables which have words:arm,belt and dumbbell are the right ones for the prediction algorithms.
+
+```{r }
+training <- Rawdf_training %>% select(contains("arm")|contains("belt")|contains("dumbell"),classe)
+
+testing <- Rawdf_testing %>% select(contains("arm")|contains("belt")|contains("dumbell"))
+training$classe<-as.factor(training$classe)
+
+```
+
+* Throwing out variables with zero variation :
+```{r }
+nzv_inxd<-nearZeroVar(training,saveMetrics = TRUE)$nzv
+nzv<-names(training)[nzv_inxd]
+
+training<-training%>%select(-nzv)
+testing <-testing%>%select(-nzv)
+
+```
+
+* Removing variables with Na's in them:
+```{r }
+Na_vars<-sapply(training, function(x){sum(is.na(x)*1)/length(x)})
+Nvs<-names(Na_vars[Na_vars!=0])
+
+training<-training%>%select(-Nvs)
+testing<-testing%>%select(-Nvs)
+
+```
+
+* Plotting the correlation matrix for the training data :
+Apparently most of the variables aren't strongly correlated.
+```{r ,fig.height=8 ,echo=FALSE ,message=FALSE}
+cormat <- round(cor(training[,-40]),2)
+ggcorrplot(cormat,
+           hc.order = TRUE,
+           type = "lower",
+           outline.color = "white",title = "Correlation matrix of the training variables")
+
+```
+## Prediction model selection
+Since the outcome of the predicted data is multiple classes i choose four classification prediction algorithms : **Random Forests**,**Generalized Boost Model**,**Decision Trees** and **Linear discriminant analysis**.
+
+* I split the data into training subset (75% of the clean training data),and the rest to test-validation of presdiction algorithm.
+* I choose 3 fold cross validation for the train control 
+
+
+```{r }
+set.seed(12345)
+inTrain<-createDataPartition(y=Rawdf_training$classe,p = .75,list = FALSE)
+training_subset<-training[inTrain,]
+testing_subset<-training[-inTrain,]
+
+control <- trainControl(method="cv", number=3, verboseIter=F)
+
+```
+
+### Random Forests model
+
+Random Forest is a robust machine learning algorithm which performs well on both regression and classification,thus it is suitable for our case.
+
+```{r }
+RF_model_fit<-train(classe~ .,data = training_subset, method="rf", trControl=control, verbose=FALSE)
+RF_prdct<-predict(RF_model_fit,newdata=testing_subset)
+confusionMatrix(as.factor(testing_subset$classe),RF_prdct)
+
+
+```
+### Generalized Boost Model 
+Generalized Boosting Models fit many decision trees using boosting method to improve the accuracy of the model.
+
+```{r }
+GBM_Model <- train(classe~ .,data = training_subset, method="gbm", trControl=control, verbose=FALSE)
+GBM_prdct<-predict(GBM_Model,newdata=testing_subset)
+confusionMatrix(as.factor(testing_subset$classe),GBM_prdct)
+
+```
+### Decision Trees Model 
+
+```{r }
+DT_model_fit<-train(classe~ .,data = training_subset, method="rpart", trControl=control)
+DT_prdct<-predict(DT_model_fit,newdata=testing_subset)
+confusionMatrix(as.factor(testing_subset$classe),DT_prdct)
+```
+
+### Linear discriminant analysis
+Linear discriminant analysis, normal discriminant analysis, or discriminant function analysis is a generalization of Fisher's linear discriminant, a method used in statistics and other fields, to find a linear combination of features that characterizes or separates two or more classes of objects or events. source:[wikipedia](https://en.wikipedia.org/wiki/Linear_discriminant_analysis) 
+
+```{r }
+lda_model = train(classe~ .,data = training_subset, method="lda",
+               trControl = control)
+lda_prdct<-predict(lda_model,newdata=testing_subset)
+confusionMatrix(testing_subset$classe,lda_prdct)
+```
+### Choosing the right prediction model
+```{r echo=FALSE ,message=FALSE}
+rf_accur<-confusionMatrix(as.factor(testing_subset$classe),RF_prdct)$overall
+gbm_accur<-confusionMatrix(as.factor(testing_subset$classe),GBM_prdct)$overall
+dt_accur<-confusionMatrix(as.factor(testing_subset$classe),DT_prdct)$overall
+lda_accur<-confusionMatrix(testing_subset$classe,lda_prdct)$overall
+
+accuracy<-rbind(rf_accur,gbm_accur,dt_accur,lda_accur)
+OS_Error<-1-accuracy[,1]
+accuracy<-cbind(accuracy,OS_Error)
+row.names(accuracy)<-c("Random forest","Generalized Boost","Decision Trees","LDA")
+accuracy[,c(1,2,8)]
+
+
+
+
+```
+* **Random forest** prediction model is the most accurate.
+
+
+```{r echo=FALSE ,message=FALSE}
+plot(RF_model_fit)
+```
+
+
+## Prediction on Test dataset
+Random forest algorithm performed very well with an accuracy of 99.1% ;we will use it for predicting 20 samples of the test data set:
+```{r }
+predict(RF_model_fit,newdata=testing)
+
+```
+
+
+
+
+
